@@ -150,9 +150,9 @@ textarea.form-input{min-height:110px;resize:vertical;line-height:1.7;}
 .form-toast{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%) translateY(6px);background:#fff;color:#000;padding:8px 16px 6px;border-radius:10px;font-size:12.5px;font-weight:500;white-space:nowrap;opacity:0;pointer-events:none;transition:.25s;z-index:6;}
 .form-toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
-.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:50;display:none;align-items:center;justify-content:center;padding:20px;cursor:zoom-out;}
-.lightbox.open{display:flex;}
-.lightbox img{max-width:100%;max-height:100%;border-radius:12px;object-fit:contain;}
+.lightbox{position:absolute;left:0;top:0;width:100%;background:rgba(0,0,0,.92);z-index:50;display:none;cursor:zoom-out;}
+.lightbox.open{display:block;}
+.lightbox img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);max-width:94%;border-radius:12px;object-fit:contain;}
 
 @media (max-width:820px){
   .page{padding:26px 16px 56px;}
@@ -489,11 +489,8 @@ function renderGallery(){
   w.appendChild(tabs);
   const body = el('div','gallery-body'); w.appendChild(body);
   const tok = ++galleryTok;
-  Promise.all(imgs.filter(r => r.type === galleryCat).map(r => probeImage(r.url))).then(list => {
-    if(tok !== galleryTok) return;
-    galleryItems = list.filter(Boolean);
-    layoutGallery();
-  });
+  galleryItems = imgs.filter(r => r.type === galleryCat);
+  layoutGallery();
 }
 /* 같은 크기로 잘라서 정렬 (한눈에 보이게) */
 let galleryItems = [];
@@ -501,10 +498,12 @@ function layoutGallery(){
   const body = document.querySelector('.gallery-body'); if(!body) return;
   body.textContent = '';
   const grid = el('div','gallery-grid'); grid.setAttribute('data-lightbox',''); body.appendChild(grid);
-  galleryItems.forEach(it => {
+  galleryItems.forEach(r => {
     const fig = el('figure','gallery-item');
-    const im = document.createElement('img'); im.src = it.src; im.alt = galleryCat + ' 샘플'; im.loading = 'lazy'; im.referrerPolicy = 'no-referrer';
-    fig.appendChild(im); grid.appendChild(fig);
+    const im = document.createElement('img'); im.alt = galleryCat + ' 샘플'; im.referrerPolicy = 'no-referrer'; im.decoding = 'async';
+    const c = imgCandidates(r.url); let k = 0;
+    im.onerror = () => { if(++k < c.length) im.src = c[k]; else fig.remove(); };
+    im.src = c[0]; fig.appendChild(im); grid.appendChild(fig);
   });
 }
 
@@ -672,15 +671,32 @@ if(SHEET_ID && !/^여기에/.test(SHEET_ID)){
   });
 } else { loadDrive().then(renderGallery); }
 
-/* 이미지 확대 */
+/* 이미지 확대: 지금 보고 있는 화면의 한가운데에 표시 (아트머그 iframe 안에서도 동일) */
 (function(){
   const box = $('lightbox'), big = box.querySelector('img');
+  let view = null;   /* 부모 창이 알려주는 현재 보이는 영역 {top, h} (iframe 좌표) */
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if(d && d.type === 'parentScroll'){ view = { top: Math.max(0, -d.rectTop), h: d.viewHeight }; if(box.classList.contains('open')) place(); }
+  });
+  function place(){
+    const standalone = window.parent === window;
+    const top = standalone ? window.pageYOffset : (view ? view.top : window.pageYOffset);
+    const h = standalone ? window.innerHeight : (view ? view.h : window.innerHeight);
+    big.style.maxHeight = Math.round(h * 0.9) + 'px';
+    big.style.top = Math.round(top + h / 2) + 'px';
+  }
+  function open(img){
+    box.style.height = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) + 'px';
+    big.src = img.src; big.alt = img.alt; box.classList.add('open'); place();
+    try{ window.parent.postMessage({ type:'requestParentScroll' }, '*'); }catch(err){}
+  }
   document.addEventListener('click', (e) => {
     const img = e.target.closest && e.target.closest('[data-lightbox] img');
-    if(img){ big.src = img.src; big.alt = img.alt; box.classList.add('open'); }
+    if(img) open(img);
   });
-  box.addEventListener('click', () => box.classList.remove('open'));
-  document.addEventListener('keydown', (e) => { if(e.key === 'Escape') box.classList.remove('open'); });
+  box.addEventListener('click', () => { box.classList.remove('open'); box.style.height = ''; });
+  document.addEventListener('keydown', (e) => { if(e.key === 'Escape'){ box.classList.remove('open'); box.style.height = ''; } });
 })();
 
 /* iframe 임베드 높이 자동조절 */
